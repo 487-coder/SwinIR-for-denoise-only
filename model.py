@@ -867,76 +867,63 @@ def validate_model(args,model, dataset_val,valnoisestd,logger,writer,epoch,
             seq = seq.to(device)
             if seq.dim() == 5 and seq.shape[0] == 1:
                 seq = seq.squeeze(0)
-            noise = torch.empty_like(seq).normal_(mean=0, std=valnoisestd.to(device))
-            noisy_seq = seq + noise
-            noisy_seq = torch.clamp(noisy_seq, 0.0, 1.0)
-            noise_map = torch.tensor([valnoisestd], dtype=torch.float32).to(device)
-            denoised_seq = denoise_seq_fastdvdnet(
-                seq=noisy_seq,
-                noise_std=noise_map,
-                temporal_window=args.temp_psz,
-                model=model)
-            gt = seq[(args.temp_psz - 1) // 2].unsqueeze(0)
-            pred = denoised_seq[(args.temp_psz - 1) // 2].unsqueeze(0)
-            noisy_center = noisy_seq[(args.temp_psz - 1) // 2].unsqueeze(0)
-            # print("GT min/max:", gt.min().item(), gt.max().item())
-            # print("Pred min/max:", pred.min().item(), pred.max().item())
+            frame_num = seq.shape[0]
+            for frame_idx in range(frame_num):
+                # 获取单帧
+                clean_frame = seq[frame_idx].unsqueeze(0)
+                noise = torch.empty_like(clean_frame).normal_(mean=0, std=valnoisestd.to(device))
+                noisy_frame = clean_frame + noise
+                noisy_frame = torch.clamp(noisy_frame, 0.0, 1.0)
 
-            psnr_clean = batch_psnr(pred, gt, data_range=1.0)
+                # 使用SwinIR去噪
+                denoised_frame = frame_denoise_swinir(model, noisy_frame, valnoisestd, device)
 
-            total_psnr += psnr_clean
-            cnt += 1
+                # 计算PSNR
+                psnr_clean = batch_psnr(denoised_frame, clean_frame, data_range=1.0)
+
+                total_psnr += psnr_clean
+                cnt += 1
+
     avg_psnr = total_psnr / cnt
     return avg_psnr
 
 
-def frame_denoise(model, noise_frame, sigma_map, context):
-    _, _, h, w = noise_frame.shape
-    pad_h = (4 - h % 4) % 4
-    pad_w = (4 - w % 4) % 4
+def frame_denoise_swinir(model, noisy_frame, noise_std, device):
+    """
+    SwinIR单帧去噪函数
+    Args:
+        model: SwinIR模型
+        noisy_frame: 噪声帧 [1, C, H, W]
+        noise_std: 噪声标准差
+        device: 设备
+    Returns:
+        denoised_frame: 去噪后的帧 [1, C, H, W]
+    """
+    _, c, h, w = noisy_frame.shape
+
+    # 确保尺寸能被某个数整除（根据SwinIR的要求调整）
+    # 一般SwinIR要求能被8整除
+    pad_h = (8 - h % 8) % 8
+    pad_w = (8 - w % 8) % 8
+
     if pad_h or pad_w:
-        noise_frame = F.pad(noise_frame, (0, pad_w, 0, pad_h), mode="reflect")
-        sigma_map = F.pad(sigma_map, (0, pad_w, 0, pad_h), mode="reflect")
+        noisy_frame = F.pad(noisy_frame, (0, pad_w, 0, pad_h), mode="reflect")
 
-    denoise_frame = model(noise_frame, sigma_map)
-    denoise_frame = torch.clamp(denoise_frame, 0.0, 1.0)
+    # SwinIR推理
+    with torch.no_grad():
+        denoised_frame = model(noisy_frame)
+        denoised_frame = torch.clamp(denoised_frame, 0.0, 1.0)
+
+    # 移除padding
     if pad_h:
-        denoise_frame = denoise_frame[:, :, :-pad_h, :]
+        denoised_frame = denoised_frame[:, :, :-pad_h, :]
     if pad_w:
-        denoise_frame = denoise_frame[:, :, :, :-pad_w]
-    return denoise_frame
+        denoised_frame = denoised_frame[:, :, :, :-pad_w]
+
+    return denoised_frame
 
 
-def denoise_seq_fastdvdnet(seq, noise_std, model, temporal_window=5, is_training=False):
-    # 如果 seq 是 [1, T, C, H, W]，则 squeeze 成 [T, C, H, W]
-    if seq.dim() == 5 and seq.shape[0] == 1:
-        seq = seq.squeeze(0)
 
-    frame_num, c, h, w = seq.shape
-    center = (temporal_window - 1) // 2
-    denoise_frames = torch.empty_like(seq).to(seq.device)
-    noise_map = noise_std.view(1, 1, 1, 1).expand(1, 1, h, w).to(seq.device)
-    model.to(seq.device)
-    context = torch.enable_grad() if is_training else torch.no_grad()
-    frames = []
-
-    with context:
-        for denoise_index in range(frame_num):
-            if not frames:
-                for index in range(temporal_window):
-                    rel_index = abs(index - center)
-                    frames.append(seq[rel_index])
-            else:
-                del frames[0]
-                rel_index = min(denoise_index + center,
-                                -denoise_index + 2 * (frame_num - 1) - center)
-                frames.append(seq[rel_index])
-
-            input_tensor = torch.stack(frames, dim=0).view(1, temporal_window * c, h, w).to(seq.device)
-            denoise_frames[denoise_index] = frame_denoise(model, input_tensor, noise_map, context)
-
-        torch.cuda.empty_cache()
-        return denoise_frames
 if __name__ == '__main__':
     upscale = 4
     window_size = 8

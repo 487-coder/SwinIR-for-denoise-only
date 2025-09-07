@@ -59,11 +59,9 @@ def main():
         logger.info(f'Training Round: {epoch + 1}')
         print(f'\n | Training Round : {epoch + 1} |\n')
         for i,(seq,gt) in enumerate(train_loader):
-            current_step += 1
-            schedular.step(current_step)
             model.train()
             optimizer.zero_grad()
-            img_train, gt_train = normalize_augment(seq,gt)
+            img_train, gt_train = normalize_augment(seq,0)
             device = next(model.parameters()).device
             img_train = img_train.to(device, non_blocking=True)
             gt_train = gt_train.to(device, non_blocking=True)
@@ -74,15 +72,17 @@ def main():
             noise = torch.zeros_like(img_train)
             noise = torch.normal(mean=noise, std=stdn.expand_as(noise))
             imgn_train = img_train + noise
-            noise_map = stdn.expand((N, 1, H, W)).cuda(non_blocking=True)
+            #noise_map = stdn.expand((N, 1, H, W)).cuda(non_blocking=True)
             out_train = model(imgn_train)
             loss = 1.0 * criterion(out_train,gt_train)
             loss.backward()
             optimizer.step()
-            if current_step % args.val_freq == 0:
-                logger.info('Running validation...')
-                model.eval()
-                psnr =validate_model(
+            current_step += 1
+            schedular.step(current_step)
+        if epoch % args.val_freq == 0:
+            logger.info('Running validation...')
+            model.eval()
+            psnr =validate_model(
                     args = args,
                     model = model,
                     dataset_val = test_loader,
@@ -93,22 +93,22 @@ def main():
                     lr = optimizer.param_groups[0]['lr'],
                     trainimg=img_train,
                     device = device
-                )
+            )
 
-                lr = optimizer.param_groups[0]['lr']
-                logger.info(f'Epoch: {epoch + 1:3d}, Step: {current_step:8d}, '
+            lr = optimizer.param_groups[0]['lr']
+            logger.info(f'Epoch: {epoch + 1:3d}, Step: {current_step:8d}, '
                             f'LR: {lr:.3e}, Loss: {loss.item():.6f}, PSNR: {psnr:.4f}')
 
                 # TensorBoard logging
-                writer.add_scalar('Train/Loss', loss.item(), current_step)
-                writer.add_scalar('Train/PSNR', psnr, current_step)
-                writer.add_scalar('Train/Learning_Rate', lr, current_step)
+            writer.add_scalar('Train/Loss', loss.item(), current_step)
+            writer.add_scalar('Train/PSNR', psnr, current_step)
+            writer.add_scalar('Train/Learning_Rate', lr, current_step)
 
-            if current_step % args.save_freq == 0:
-                logger.info(f'Saving checkpoint at step {current_step}')
-                checkpoint_path = save_checkpoint(model, optimizer, schedular, epoch,
+        if epoch % args.save_freq == 0:
+            logger.info(f'Saving checkpoint at step {current_step}')
+            checkpoint_path = save_checkpoint(model, optimizer, schedular, epoch,
                                                   current_step, args.save_dir)
-                logger.info(f'Checkpoint saved to: {checkpoint_path}')
+            logger.info(f'Checkpoint saved to: {checkpoint_path}')
     writer.close()
     logger.info('Training completed!')
 

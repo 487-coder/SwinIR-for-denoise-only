@@ -7,16 +7,16 @@ def args_parser():
                         help='save model path')
     parser.add_argument('--train_dataset', default='./mp4',
                         help='train file root')
-    parser.add_argument('--max_number_patches', type=int, default=256000,
+    parser.add_argument('--max_number_patches', type=int, default=2560,
                         help='Patch size')
     parser.add_argument('--batch_size', type=int, default=8,
                         help='pretrain batch size')
     parser.add_argument('--val_data', default='./480p',
                         help='test file root')
-    parser.add_argument("--noise_level", nargs=2, type=float, default=[5, 55],
+    parser.add_argument("--noise_level", nargs=2, type=float, default=[5/255.0, 55/255.0],
                         help="Noise training interval")
     parser.add_argument('--val_freq',type=int, default=1)
-    parser.add_argument("--test_noise", type=float, default=25,
+    parser.add_argument("--test_noise", type=float, default=25/255.0,
                         help='noise level used on validation set')
     parser.add_argument('--save_freq', type=int, default=5)
     parser.add_argument("--temp_psz", type=int, default=1,

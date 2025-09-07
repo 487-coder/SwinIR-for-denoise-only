@@ -9,7 +9,7 @@ from utils import open_sequence
 from pathlib import Path
 from torchvision import transforms as T
 from torch.utils.data import Dataset
-NUMFRXSEQ_VAL = 1
+NUMFRXSEQ_VAL = 15
 VALSEQPATT = '*'
 
 class VideoSequenceDataset(Dataset):
