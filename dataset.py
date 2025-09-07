@@ -32,7 +32,7 @@ class VideoSequenceDataset(Dataset):
         # 预加载所有视频帧到内存
         self.videos = []
         for p in self.video_paths:
-            frames = iio.imread(str(p), plugin="pyav")  # [T, H, W, 3], RGB
+            frames = iio.imread(str(p))  # [T, H, W, 3], RGB
             self.videos.append(np.asarray(frames))
 
         self.seq_len = sequence_length
